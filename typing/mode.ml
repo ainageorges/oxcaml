@@ -1452,6 +1452,11 @@ module Lattices_mono = struct
 
   let id = Id
 
+  let is_identity_morph :
+      type a0 a1 l r. a1 obj -> (a0, a1, l * r) morph -> (a0, a1) Misc.eq option =
+    fun dst f -> eq_morph dst f (id : (a1, a1, l * r) morph)
+
+
   let linear_to_unique = function
     | Linearity.Many -> Uniqueness.Aliased
     | Linearity.Once -> Uniqueness.Unique
@@ -2430,6 +2435,14 @@ let append_changes : (changes ref -> unit) ref = ref (fun _ -> assert false)
 
 let set_append_changes f = append_changes := f
 
+type copy_scope = S.copy_scope
+
+let with_copy_scope = S.with_copy_scope
+
+type copy_scope = S.copy_scope
+
+let with_copy_scope = S.with_copy_scope
+
 type ('a, 'd) mode = ('a, 'd) S.mode
 
 module Error = struct
@@ -2622,6 +2635,36 @@ module Comonadic_gen (Obj : Obj) = struct
 
   let generalize_structure pp ~current_level ~generic_level a =
     with_log (Solver.generalize_structure pp ~current_level ~generic_level obj a)
+
+  let instantiate ~copy_scope ~current_level ~generic_level a =
+    let copy_from_level = generic_level in
+    let copy_to_level = current_level in
+    Solver.copy ~copy_scope ~copy_from_level ~copy_to_level obj a
+
+  let copy_generic ~copy_scope ~generic_level a =
+    let copy_from_level = generic_level in
+    let copy_to_level = Stdlib.max_int in
+    Solver.copy ~copy_scope ~copy_from_level ~copy_to_level obj a
+
+  let duplicate ~copy_scope a =
+    let copy_from_level = 0 in
+    let copy_to_level = Stdlib.max_int in
+    Solver.copy ~copy_scope ~copy_from_level ~copy_to_level obj a
+
+  let instantiate ~copy_scope ~current_level ~generic_level a =
+    let copy_from_level = generic_level in
+    let copy_to_level = current_level in
+    Solver.copy ~copy_scope ~copy_from_level ~copy_to_level obj a
+
+  let copy_generic ~copy_scope ~generic_level a =
+    let copy_from_level = generic_level in
+    let copy_to_level = Stdlib.max_int in
+    Solver.copy ~copy_scope ~copy_from_level ~copy_to_level obj a
+
+  let duplicate ~copy_scope a =
+    let copy_from_level = 0 in
+    let copy_to_level = Stdlib.max_int in
+    Solver.copy ~copy_scope ~copy_from_level ~copy_to_level obj a
 
   let join l = Solver.join obj l
 
@@ -3808,6 +3851,24 @@ module Value_with (Areality : Areality) = struct
       { monadic = monadic0; comonadic = comonadic0} =
     Monadic.generalize_structure pp ~current_level ~generic_level monadic0;
     Comonadic.generalize_structure pp ~current_level ~generic_level comonadic0
+
+  let instantiate ~copy_scope ~current_level ~generic_level
+      { monadic = monadic0; comonadic = comonadic0} =
+    let monadic1 = Monadic.instantiate ~copy_scope ~current_level ~generic_level monadic0 in
+    let comonadic1 = Comonadic.instantiate ~copy_scope ~current_level ~generic_level comonadic0 in
+    { monadic = monadic1; comonadic = comonadic1 }
+
+  let copy_generic ~copy_scope ~generic_level
+      { monadic = monadic0; comonadic = comonadic0} =
+    let monadic1 = Monadic.copy_generic ~copy_scope ~generic_level monadic0 in
+    let comonadic1 = Comonadic.copy_generic ~copy_scope ~generic_level comonadic0 in
+    { monadic = monadic1; comonadic = comonadic1 }
+
+  let duplicate ~copy_scope
+      { monadic = monadic0; comonadic = comonadic0} =
+    let monadic1 = Monadic.duplicate ~copy_scope monadic0 in
+    let comonadic1 = Comonadic.duplicate ~copy_scope comonadic0 in
+    { monadic = monadic1; comonadic = comonadic1 }
 
   let equate a b = try_with_log (equate_from_submode (submode_log ?pp:None) a b)
 
