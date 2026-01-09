@@ -162,6 +162,8 @@ module type Common = sig
   val submode_err :
     Mode_hint.pinpoint -> (allowed * 'r) t -> ('l * allowed) t -> unit
 
+  val update_level : int -> ('l * 'r) t -> unit
+
   val equate : lr -> lr -> (unit, equate_error) result
 
   (** Similiar to [submode], but crashes the compiler if errors. Use this
