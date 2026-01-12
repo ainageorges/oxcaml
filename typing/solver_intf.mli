@@ -279,6 +279,7 @@ module type Solver_mono = sig
 
   (** Lowers a level of a variable. *)
   val update_level :
+    pinpoint ->
     int ->
     'a obj ->
     ('a, 'l * 'r) mode ->

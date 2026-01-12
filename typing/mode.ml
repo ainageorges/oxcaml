@@ -2615,7 +2615,7 @@ module Comonadic_gen (Obj : Obj) = struct
 
   let print_error pp err = Error.print_axis pp obj err
 
-  let update_level i a = with_log (Solver.update_level i obj a)
+  let update_level pp i a = with_log (Solver.update_level pp i obj a)
 
   let join l = Solver.join obj l
 
@@ -2716,6 +2716,8 @@ module Monadic_gen (Obj : Obj) = struct
     match submode ~pp a b with
     | Ok () -> ()
     | Error e -> raise (Submode_error_simple_context (pp, Axis (obj, e)))
+
+  let update_level pp i a = with_log (Solver.update_level pp i obj a)
 
   let print_error pp err = Error.print_axis pp obj err
 
@@ -3781,9 +3783,9 @@ module Value_with (Areality : Areality) = struct
     Comonadic.submode_err pp a.comonadic b.comonadic;
     Monadic.submode_err pp a.monadic b.monadic
 
-  let update_level i { monadic = monadic0; comonadic = comonadic0 } =
-    Monadic.update_level i monadic0;
-    Comonadic.update_level i comonadic0
+  let update_level pp i { monadic = monadic0; comonadic = comonadic0 } =
+    Monadic.update_level pp i monadic0;
+    Comonadic.update_level pp i comonadic0
 
   let equate a b = try_with_log (equate_from_submode (submode_log ?pp:None) a b)
 
