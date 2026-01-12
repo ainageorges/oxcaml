@@ -164,6 +164,18 @@ module type Common = sig
 
   val update_level : Mode_hint.pinpoint -> int -> ('l * 'r) t -> unit
 
+  val generalize :
+    current_level:int ->
+    generic_level:int ->
+    ('l * 'r) t ->
+    unit
+
+  val generalize_structure :
+    current_level:int ->
+    generic_level:int ->
+    ('l * 'r) t ->
+    unit
+
   val equate : lr -> lr -> (unit, equate_error) result
 
   (** Similiar to [submode], but crashes the compiler if errors. Use this
