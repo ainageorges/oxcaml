@@ -289,6 +289,7 @@ module type Solver_mono = sig
   (** Generalizes all reachable variables whose level is above [current_level],
       by putting their level to [generic_level]. *)
   val generalize :
+    pinpoint ->
     current_level:int ->
     generic_level:int ->
     'a obj ->
@@ -298,7 +299,8 @@ module type Solver_mono = sig
 
   (** Generalizes all reachable variables whose level is above [current_level],
       whose value is fully determined, by putting their level to [generic_level].*)
-      val generalize_structure :
+  val generalize_structure :
+      pinpoint ->
       current_level:int ->
       generic_level:int ->
       'a obj ->

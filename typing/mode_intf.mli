@@ -165,12 +165,14 @@ module type Common = sig
   val update_level : Mode_hint.pinpoint -> int -> ('l * 'r) t -> unit
 
   val generalize :
+    Mode_hint.pinpoint ->
     current_level:int ->
     generic_level:int ->
     ('l * 'r) t ->
     unit
 
   val generalize_structure :
+    Mode_hint.pinpoint ->
     current_level:int ->
     generic_level:int ->
     ('l * 'r) t ->
