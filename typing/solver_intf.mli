@@ -158,12 +158,6 @@ module type Lattices_mono = sig
     ('a1, 'b, 'l1 * 'r1) morph ->
     ('a0, 'a1) Misc.eq option
 
-  (** Checks if a morphism is the identity. If so, returns [Some Refl]. *)
-  val is_identity_morph :
-    'a1 obj ->
-    ('a0, 'a1, 'l0 * 'r0) morph ->
-    ('a0, 'a1) Misc.eq option
-
   (** Print morphism *)
   val print_morph : 'b obj -> Format.formatter -> ('a, 'b, 'd) morph -> unit
 end
@@ -187,7 +181,14 @@ module type Solver_mono = sig
 
   type pinpoint
 
+  (** Represents a sequence of local changes to the copying scope of a mode variable.
+      Copying a mode takes a [copy_scope], and it is up to the caller to create a
+      new copy scope, and reset it once all copies have been made *)
   type copy_scope
+
+  (** Runs a function [f] in a fresh mode copy scope, which gets cleaned up once [f] is
+      finished  *)
+  val with_copy_scope : (copy_scope -> 'a) -> 'a
 
   type 'd hint_morph constraint 'd = 'l * 'r
 
@@ -323,6 +324,7 @@ module type Solver_mono = sig
     copy_scope:copy_scope ->
     copy_from_level:int ->
     copy_to_level:int ->
+    pinpoint ->
     'a obj ->
     ('a, 'l * 'r) mode ->
     ('a, 'l * 'r) mode

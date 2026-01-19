@@ -1299,82 +1299,63 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
           generalize_structure_v ~log pp obj ~current_level ~generic_level v)
         mvs
 
-  let copy_exists : type a. copy_to_level: int -> a C.obj -> a var -> (a var) option =
-    fun ~copy_to_level obj v ->
-      match v.vlower, v.vupper with
-      | Amorphvar (u1, f) :: _, Amorphvar (u2, _) :: _ ->
-        begin
-          match C.is_identity_morph obj f with
-          | Some Refl ->
-            let valid_candidate =
-              u1.level = copy_to_level &&
-              u1.id = u2.id
-            in
-            if valid_candidate then Some (u1 : a var) else None
-          | None -> None
-        end
-      | _, _ -> None
-
   let rec copy_v
       : type a. copy_scope:_ -> copy_from_level:int -> copy_to_level:int ->
-        a C.obj -> a var -> a var =
-    fun ~copy_scope ~copy_from_level ~copy_to_level obj v ->
+        H.Pinpoint.t -> a C.obj -> a var -> a var =
+    fun ~copy_scope ~copy_from_level ~copy_to_level pp obj v ->
       if v.level < copy_from_level then v
       else begin
-        (* Optimization: generalize_structure might have already created a copy. *)
-        match copy_exists ~copy_to_level obj v with
+        (* TODO: generalize_structure might have already created a copy, we can optimize
+          the following by checking if such a copy exists *)
+        match v.subst with
         | Some v' -> v'
-        | None -> begin
-          match v.subst with
-          | Some v' -> v'
-          | None ->
-            let copy = fresh ~upper:v.upper ~lower:v.lower ~level:v.level obj in
-            set_optcopy ~changes:copy_scope obj v (Some copy);
-            let vupper = List.map
-              (fun (Amorphvar (u, f)) ->
-                let src = C.src obj f in
-                let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level src u in
-                (Amorphvar (ucopy, f)))
-              v.vupper;
-            in
-            let vlower = List.map
-              (fun (Amorphvar (u, f)) ->
-                let src = C.src obj f in
-                let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level src u in
-                (Amorphvar (ucopy, f)))
-              v.vlower
-            in
-            copy.vupper <- vupper;
-            copy.vlower <- vlower;
-            update_level_v ~log:None obj copy_to_level copy;
-            copy
-        end
+        | None ->
+          let copy = fresh ~upper:v.upper ~lower:v.lower ~level:v.level obj in
+          set_optcopy ~changes:copy_scope obj v (Some copy);
+          let vupper = VarMap.map
+            (fun (Amorphvar (u, f, f_hint)) ->
+              let src = C.src obj f in
+              let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp src u in
+              (Amorphvar (ucopy, f, f_hint)))
+            v.vupper;
+          in
+          let vlower = VarMap.map
+            (fun (Amorphvar (u, f, f_hint)) ->
+              let src = C.src obj f in
+              let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp src u in
+              (Amorphvar (ucopy, f, f_hint)))
+            v.vlower
+          in
+          copy.vupper <- vupper;
+          copy.vlower <- vlower;
+          update_level_v ~log:None pp obj copy_to_level copy;
+          copy
       end
 
-  let copy (type a l r) ~copy_scope ~copy_from_level ~copy_to_level (obj : a C.obj)
-      (a : (a, l * r) mode) : (a, l * r) mode =
+  let copy (type a l r) ~copy_scope ~copy_from_level ~copy_to_level (pp : H.Pinpoint.t)
+      (obj : a C.obj) (a : (a, l * r) mode) : (a, l * r) mode =
     match a with
-    | Amodevar (Amorphvar (v, f)) ->
+    | Amodevar (Amorphvar (v, f, f_hint)) ->
       let obj = C.src obj f in
-      let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level obj v in
-      Amodevar (Amorphvar (vcopy, f))
-    | Amode a -> Amode a
-    | Amodejoin (a, mvs) ->
-      let mvscopy = List.map
-        (fun (Amorphvar (v, f)) ->
+      let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp obj v in
+      Amodevar (Amorphvar (vcopy, f, f_hint))
+    | Amode (a, a_hint_lower, a_hint_upper) -> Amode (a, a_hint_lower, a_hint_upper)
+    | Amodejoin (a, a_hint, mvs) ->
+      let mvscopy = VarMap.map
+        (fun (Amorphvar (v, f, f_hint)) ->
           let obj = C.src obj f in
-          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level obj v in
-          (Amorphvar (vcopy, f))) mvs
+          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp obj v in
+          (Amorphvar (vcopy, f, f_hint))) mvs
       in
-      Amodejoin (a, mvscopy)
-    | Amodemeet (a, mvs) ->
-      let mvscopy = List.map
-        (fun (Amorphvar (v, f)) ->
+      Amodejoin (a, a_hint, mvscopy)
+    | Amodemeet (a, a_hint, mvs) ->
+      let mvscopy = VarMap.map
+        (fun (Amorphvar (v, f, f_hint)) ->
           let obj = C.src obj f in
-          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level obj v in
-          (Amorphvar (vcopy, f))) mvs
+          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp obj v in
+          (Amorphvar (vcopy, f, f_hint))) mvs
       in
-      Amodemeet (a, mvscopy)
+      Amodemeet (a, a_hint, mvscopy)
 
   let update_level (type a l r) (pp : H.Pinpoint.t) (level : int) (obj : a C.obj)
       (a : (a, l * r) mode) ~log =

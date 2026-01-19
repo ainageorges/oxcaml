@@ -768,17 +768,20 @@ module type S = sig
       copy_scope:copy_scope ->
       current_level:int ->
       generic_level:int ->
+      (Mode_hint.pinpoint, Mode_hint.pinpoint) monadic_comonadic ->
       ('l * 'r) t ->
       ('l * 'r) t
 
     val copy_generic :
       copy_scope:copy_scope ->
       generic_level:int ->
+      (Mode_hint.pinpoint, Mode_hint.pinpoint) monadic_comonadic ->
       ('l * 'r) t ->
       ('l * 'r) t
 
     val duplicate :
       copy_scope:copy_scope ->
+      (Mode_hint.pinpoint, Mode_hint.pinpoint) monadic_comonadic ->
       ('l * 'r) t ->
       ('l * 'r) t
   end
