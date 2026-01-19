@@ -437,7 +437,8 @@ let apply_type_function params args body =
           let t = newgenstub ~scope:(get_scope ty)
             (Jkind.Builtin.any ~why:Dummy_jkind) in
           For_copy.redirect_desc copy_scope ty (Tsubst (t, None));
-          let desc' = copy_type_desc copy desc in
+          let copy_mode m = For_copy.mode_copy_generic copy_scope m in
+          let desc' = copy_type_desc copy copy_mode desc in
           Transient_expr.set_stub_desc t desc';
           t
     in
@@ -573,7 +574,13 @@ let rec typexp copy_scope s ty =
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret), arg, ret, comm)
-      | _ -> copy_type_desc (typexp copy_scope s) desc
+      | _ ->
+        let copy_mode =
+          if should_duplicate_vars || get_id ty < 0
+          then (fun m -> For_copy.mode_duplicate copy_scope m)
+          else (fun m -> m)
+        in
+        copy_type_desc (typexp copy_scope s) copy_mode desc
     in
     Transient_expr.set_stub_desc ty' desc;
     ty'
@@ -594,7 +601,8 @@ let typexp copy_scope s loc ty =
 *)
 let type_expr s ty =
   let loc = Option.value s.loc ~default:Location.none in
-  For_copy.with_scope (fun copy_scope -> typexp copy_scope s loc ty)
+  For_copy.with_scope (fun copy_scope ->
+    typexp copy_scope s loc ty)
 
 let label_declaration copy_scope s l =
   {

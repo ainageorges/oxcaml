@@ -1037,7 +1037,7 @@ let nameable_row row =
 (* This specialized version of [Btype.iter_type_expr] normalizes and
    short-circuits the traversal of the [type_expr], so that it covers only the
    subterms that would be printed by the type printer. *)
-let printer_iter_type_expr f ty =
+let printer_iter_type_expr f fm  ty =
   match get_desc ty with
   | Tconstr(p, tyl, _) ->
       let (_p', s) = best_type_path p in
@@ -1066,7 +1066,7 @@ let printer_iter_type_expr f ty =
         f ty1;
       f ty2
   | _ ->
-      Btype.iter_type_expr f ty
+      Btype.iter_type_expr f fm ty
 
 module Internal_names : sig
 
@@ -1189,7 +1189,7 @@ end = struct
       | Tvar _ | Tunivar _ ->
           add_named_var tty
       | _ ->
-          printer_iter_type_expr add_named_vars ty
+          printer_iter_type_expr add_named_vars (Fun.const ()) ty
     end
 
   let substitute ty =
@@ -1343,13 +1343,13 @@ let rec mark_loops_rec visited ty =
         if List.memq px !visited_objects then add_alias_proxy px else begin
           if should_visit_object ty then
             visited_objects := px :: !visited_objects;
-          printer_iter_type_expr (mark_loops_rec visited) ty
+          printer_iter_type_expr (mark_loops_rec visited) (Fun.const ()) ty
         end
     | Tpoly(ty, tyl) ->
         List.iter add_alias tyl;
         mark_loops_rec visited ty
     | _ ->
-        printer_iter_type_expr (mark_loops_rec visited) ty
+        printer_iter_type_expr (mark_loops_rec visited) (Fun.const ()) ty
 
 let mark_loops ty =
   mark_loops_rec [] ty
@@ -1543,7 +1543,7 @@ let rec tree_of_modal_typexp mode modal ty =
            don't print anything for those axes, since user would interpret that
            as legacy. The best we can do is to zap to legacy and if they do land
            at legacy, we will be able to omit printing them. *)
-        let arg_mode = Alloc.zap_to_legacy marg in
+        let arg_mode = Alloc.zap_to_legacy_force marg in
         let t1 =
           if is_optional l then
             match

@@ -364,7 +364,7 @@ Error: This value is "local"
          because it is a function return value.
          Hint: Use exclave_ to return a local value.
   Hint: This is a partial application
-        Adding 1 more argument will make the value non-local
+        Adding 1 more argument may make the value non-local
 |}]
 
 (* Optional argument elimination eta-expands and therefore allocates *)

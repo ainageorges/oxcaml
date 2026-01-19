@@ -2656,9 +2656,10 @@ let remove_functor_mode_variables = function
   | _ -> ()
 
 let remove_mode_and_jkind_variables env sg =
-  let rm_ty _env ty = Ctype.remove_mode_and_jkind_variables ty; None in
-  let rm_mty _env mty = remove_functor_mode_variables mty in
-  List.find_map (nongen_signature_item env rm_ty rm_mty) sg |> ignore
+  Mode.Alloc.with_zap_scope(fun ~zap_scope ->
+    let rm_ty _env ty = Ctype.remove_mode_and_jkind_variables ty ~zap_scope; None in
+    let rm_mty _env mty = remove_functor_mode_variables mty in
+    List.find_map (nongen_signature_item env rm_ty rm_mty) sg |> ignore)
 
 (* Helpers for typing recursive modules *)
 
@@ -3092,6 +3093,7 @@ and type_module_aux ~alias ~hold_locks sttn funct_body anchor env
       let mty =
         match get_desc (Ctype.expand_head env exp.exp_type) with
           Tpackage (p, fl) ->
+            List.iter (fun (_n, t) -> Mode.Alloc.with_zap_scope Ctype.remove_mode_and_jkind_variables t) fl;
             if List.exists (fun (_n, t) -> not (Ctype.closed_type_expr t)) fl
             then
               raise (Error (smod.pmod_loc, env,
@@ -3899,7 +3901,7 @@ let remove_mode_and_jkind_variables_for_toplevel str =
                          vb_expr = exp}])) }] ->
      (* These types are printed by the toplevel,
         even though they do not appear in sg *)
-     Ctype.remove_mode_and_jkind_variables exp.exp_type
+     Mode.Alloc.with_zap_scope Ctype.remove_mode_and_jkind_variables exp.exp_type
   | _ -> ()
 
 let type_toplevel_phrase env sig_acc s =
