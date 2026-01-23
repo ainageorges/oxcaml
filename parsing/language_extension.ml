@@ -88,7 +88,8 @@ let get_level_ops : type a. a t -> (module Extension_level with type t = a) =
 *)
 (* CR ageorges: is mode polymorphism erasable? *)
 let is_erasable : type a. a t -> bool = function
-  | Mode | Unique | Overwriting | Layouts | Layout_poly | Mode_polymorphism -> true
+  | Mode | Unique | Overwriting | Layouts | Layout_poly | Mode_polymorphism ->
+    true
   | Comprehensions | Include_functor | Polymorphic_parameters | Immutable_arrays
   | Module_strengthening | SIMD | Labeled_tuples | Small_numbers | Instances
   | Let_mutable | Runtime_metaprogramming ->
@@ -240,10 +241,10 @@ let equal_t (type a b) (a : a t) (b : b t) : (a, b) Misc.eq option =
   | Let_mutable, Let_mutable -> Some Refl
   | Layout_poly, Layout_poly -> Some Refl
   | Runtime_metaprogramming, Runtime_metaprogramming -> Some Refl
-  | ( ( Comprehensions | Mode | Unique | Overwriting | Mode_polymorphism | Include_functor
-      | Polymorphic_parameters | Immutable_arrays | Module_strengthening
-      | Layouts | SIMD | Labeled_tuples | Small_numbers | Instances
-      | Let_mutable | Layout_poly | Runtime_metaprogramming ),
+  | ( ( Comprehensions | Mode | Unique | Overwriting | Mode_polymorphism
+      | Include_functor | Polymorphic_parameters | Immutable_arrays
+      | Module_strengthening | Layouts | SIMD | Labeled_tuples | Small_numbers
+      | Instances | Let_mutable | Layout_poly | Runtime_metaprogramming ),
       _ ) ->
     None
 
@@ -373,7 +374,11 @@ end = struct
         let max_allowed_lvl = List.fold_left Ops.max lvl lvls in
         Some (Pair (extn, max_allowed_lvl))
     in
-    let all = List.filter (fun (Pack extn) -> not (equal extn Mode_polymorphism)) all_extensions in
+    let all =
+      List.filter
+        (fun (Pack extn) -> not (equal extn Mode_polymorphism))
+        all_extensions
+    in
     List.filter_map maximal_in_universe all
 end
 

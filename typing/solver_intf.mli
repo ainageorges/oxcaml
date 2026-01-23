@@ -181,13 +181,13 @@ module type Solver_mono = sig
 
   type pinpoint
 
-  (** Represents a sequence of local changes to the copying scope of a mode variable.
-      Copying a mode takes a [copy_scope], and it is up to the caller to create a
-      new copy scope, and reset it once all copies have been made *)
+  (** Represents a sequence of local changes to the copying scope of a mode
+      variable. Copying a mode takes a [copy_scope], and it is up to the caller
+      to create a new copy scope, and reset it once all copies have been made *)
   type copy_scope
 
-  (** Runs a function [f] in a fresh mode copy scope, which gets cleaned up once [f] is
-      finished  *)
+  (** Runs a function [f] in a fresh mode copy scope, which gets cleaned up once
+      [f] is finished *)
   val with_copy_scope : (copy_scope -> 'a) -> 'a
 
   type 'd hint_morph constraint 'd = 'l * 'r
@@ -291,11 +291,7 @@ module type Solver_mono = sig
 
   (** Lowers a level of a variable. *)
   val update_level :
-    int ->
-    'a obj ->
-    ('a, 'l * 'r) mode ->
-    log:changes ref option ->
-    unit
+    int -> 'a obj -> ('a, 'l * 'r) mode -> log:changes ref option -> unit
 
   (** Generalizes all reachable variables whose level is above [current_level],
       by putting their level to [generic_level]. *)
@@ -307,16 +303,17 @@ module type Solver_mono = sig
     unit
 
   (** Generalizes all reachable variables whose level is above [current_level],
-      whose value is fully determined, by putting their level to [generic_level].*)
+      whose value is fully determined, by putting their level to
+      [generic_level].*)
   val generalize_structure :
-      current_level:int ->
-      'a obj ->
-      ('a, 'l * 'r) mode ->
-      log:changes ref option ->
-      unit
+    current_level:int ->
+    'a obj ->
+    ('a, 'l * 'r) mode ->
+    log:changes ref option ->
+    unit
 
-  (** Copies all reachable variables whose level is at or above [copy_from_level],
-      and enforces that the copy is below [copy_to_level].
+  (** Copies all reachable variables whose level is at or above
+      [copy_from_level], and enforces that the copy is below [copy_to_level].
       Returns the copied mode *)
   val copy :
     copy_scope:copy_scope ->
@@ -368,32 +365,38 @@ module type Solver_mono = sig
     ?verbose:bool -> 'a obj -> Format.formatter -> ('a, 'l * 'r) mode -> unit
 
   (** Returns true iff the mode has the given level or is a constant *)
-  val check_level :
-    ('a, 'l * 'r) mode -> int -> bool
+  val check_level : ('a, 'l * 'r) mode -> int -> bool
 
   (** Returns true iff the mode is a variable at the given level *)
-  val check_level_var :
-    ('a, 'l * 'r) mode -> int -> bool
+  val check_level_var : ('a, 'l * 'r) mode -> int -> bool
 
-  type var_iterator = { iter : 'a. 'a obj -> ('a, allowed * allowed) mode -> unit } [@@unboxed]
+  type var_iterator =
+    { iter : 'a. 'a obj -> ('a, allowed * allowed) mode -> unit }
+  [@@unboxed]
 
-  val mode_iter : 'a obj -> ('a, ('l * 'r)) mode -> var_iterator -> unit
+  val mode_iter : 'a obj -> ('a, 'l * 'r) mode -> var_iterator -> unit
 
-  (** Applies an iterator over every reachable covariant (left-) constraint variable.
-      The iterator is only applied to constraint variables at level 0, and exposes the
-      int identifier of the constraint variable.
-      WARNING: the iterator is only applied once per constraint, even when it appears as
-      a constraint multiple times via different morphisms *)
+  (** Applies an iterator over every reachable covariant (left-) constraint
+      variable. The iterator is only applied to constraint variables at level 0,
+      and exposes the int identifier of the constraint variable. WARNING: the
+      iterator is only applied once per constraint, even when it appears as a
+      constraint multiple times via different morphisms *)
   val iter_covariant :
-    'a obj -> ('a, allowed * 'r) mode -> (int -> ('a, allowed * disallowed) mode -> unit) -> unit
+    'a obj ->
+    ('a, allowed * 'r) mode ->
+    (int -> ('a, allowed * disallowed) mode -> unit) ->
+    unit
 
-  (** Applies an iterator over every reachable contravariant (right-) constraint variable.
-      The iterator is only applied to constraint variables at level 0, and exposes the
-      int identifier of the constraint variable.
-      WARNING: the iterator is only applied once per constraint, even when it appears as
-      a constraint multiple times via different morphisms *)
+  (** Applies an iterator over every reachable contravariant (right-) constraint
+      variable. The iterator is only applied to constraint variables at level 0,
+      and exposes the int identifier of the constraint variable. WARNING: the
+      iterator is only applied once per constraint, even when it appears as a
+      constraint multiple times via different morphisms *)
   val iter_contravariant :
-    'a obj -> ('a, 'l * allowed) mode -> (int -> ('a, disallowed * allowed) mode -> unit) -> unit
+    'a obj ->
+    ('a, 'l * allowed) mode ->
+    (int -> ('a, disallowed * allowed) mode -> unit) ->
+    unit
 
   (** Apply a monotone morphism explained by an optional hint *)
   val apply :

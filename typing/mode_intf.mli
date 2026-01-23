@@ -166,15 +166,9 @@ module type Common = sig
 
   val update_level : int -> ('l * 'r) t -> unit
 
-  val generalize :
-    current_level:int ->
-    ('l * 'r) t ->
-    unit
+  val generalize : current_level:int -> ('l * 'r) t -> unit
 
-  val generalize_structure :
-    current_level:int ->
-    ('l * 'r) t ->
-    unit
+  val generalize_structure : current_level:int -> ('l * 'r) t -> unit
 
   val equate : lr -> lr -> (unit, equate_error) result
 
@@ -760,10 +754,7 @@ module type S = sig
 
     val join_with : 'a Monadic.Axis.t -> 'a -> ('l * 'r) t -> ('l * 'r) t
 
-    val add_mode_to_zap_scope :
-      (allowed * allowed) t
-      -> zap_scope
-      -> unit
+    val add_mode_to_zap_scope : (allowed * allowed) t -> zap_scope -> unit
 
     val zap_to_legacy_exn : lr -> Const.t
 
@@ -801,20 +792,11 @@ module type S = sig
     val partial_apply : (allowed * 'r) t -> l
 
     val instantiate :
-      copy_scope:copy_scope ->
-      current_level:int ->
-      ('l * 'r) t ->
-      ('l * 'r) t
+      copy_scope:copy_scope -> current_level:int -> ('l * 'r) t -> ('l * 'r) t
 
-    val copy_generic :
-      copy_scope:copy_scope ->
-      ('l * 'r) t ->
-      ('l * 'r) t
+    val copy_generic : copy_scope:copy_scope -> ('l * 'r) t -> ('l * 'r) t
 
-    val duplicate :
-      copy_scope:copy_scope ->
-      ('l * 'r) t ->
-      ('l * 'r) t
+    val duplicate : copy_scope:copy_scope -> ('l * 'r) t -> ('l * 'r) t
 
     module Guts : sig
       (** Returns [Some c] if the given mode has been constrained to constant
@@ -1012,8 +994,8 @@ module type S = sig
         of [t0] on [ax], and [right] is the projection of [t1] on [ax]. *)
     val sub : t -> t -> (unit, error) Result.t
 
-      (** [update_level n t] updates the level of mode variables in [t] to [n] *)
-      val update_level : int -> t -> unit
+    (** [update_level n t] updates the level of mode variables in [t] to [n] *)
+    val update_level : int -> t -> unit
 
     (** [equate t0 t1] checks that [t0 = t1]. Definition: [t0 = t1] iff
         [t0 <= t1] and [t1 <= t0]. *)
