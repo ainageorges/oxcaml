@@ -355,10 +355,10 @@ let iter_type_expr_kind f = function
                   (**********************************)
 
 let rec mark_type mark ty =
-  if try_mark_node mark ty then iter_type_expr (mark_type mark) ty
+  if try_mark_node mark ty then iter_type_expr (mark_type mark) (Fun.const ()) ty
 
 let mark_type_params mark ty =
-  iter_type_expr (mark_type mark) ty
+  iter_type_expr (mark_type mark) (Fun.const ()) ty
 
                   (**********************************)
                   (*  (Object-oriented) iterator    *)
@@ -382,6 +382,8 @@ type 'a type_iterators =
     it_type_kind: 'a type_iterators -> type_decl_kind -> unit;
     it_do_type_expr: 'a type_iterators -> 'a;
     it_type_expr: 'a type_iterators -> type_expr -> unit;
+    it_mode_expr: Mode.Alloc.lr -> unit;
+    it_modality: Mode.Modality.t -> unit;
     it_path: Path.t -> unit; }
 
 type type_iterators_full = (type_expr -> unit) type_iterators
@@ -400,7 +402,6 @@ let type_iterators_without_type_expr =
     | Sig_class_type (_, ctd, _, _) -> it.it_class_type_declaration it ctd
   and it_value_description it vd =
     it.it_type_expr it vd.val_type;
-    it.it_modality vd.val_modalities
   and it_type_declaration it td =
     List.iter (it.it_type_expr it) td.type_params;
     Option.iter (it.it_type_expr it) td.type_manifest;
@@ -453,18 +454,20 @@ let type_iterators_without_type_expr =
   and it_type_kind it kind =
     iter_type_expr_kind (it.it_type_expr it) kind
   and it_path _p = ()
+  and it_mode_expr _m = ()
+  and it_modality _m = ()
   in
   { it_path; it_type_expr = (fun _ _ -> ()); it_do_type_expr = (fun _ _ -> ());
     it_type_kind; it_class_type; it_functor_param; it_module_type;
     it_signature; it_class_type_declaration; it_class_declaration;
     it_modtype_declaration; it_module_declaration; it_extension_constructor;
-    it_type_declaration; it_value_description; it_signature_item; }
+    it_type_declaration; it_value_description; it_signature_item; it_mode_expr; it_modality }
 
 let type_iterators mark =
   let it_type_expr it ty =
     if try_mark_node mark ty then it.it_do_type_expr it ty
   and it_do_type_expr it ty =
-    iter_type_expr (it.it_type_expr it) it.it_mode_expr ty;
+    iter_type_expr (it.it_type_expr it) (it.it_mode_expr) ty;
     match get_desc ty with
       Tconstr (p, _, _)
     | Tobject (_, {contents=Some (p, _)})
@@ -473,10 +476,8 @@ let type_iterators mark =
     | Tvariant row ->
         Option.iter (fun (p,_) -> it.it_path p) (row_name row)
     | _ -> ()
-  and it_mode_expr _m = ()
-  and it_modality _m = ()
   in
-  {type_iterators_without_type_expr with it_type_expr; it_do_type_expr; it_mode_expr; it_modality}
+  {type_iterators_without_type_expr with it_type_expr; it_do_type_expr}
 
                   (**********************************)
                   (*  Utilities for copying         *)

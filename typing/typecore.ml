@@ -758,7 +758,7 @@ let optimise_allocations () =
   - Add it back when middle-end can really utilize this information. *)
   List.iter
     (fun mode ->
-      Locality.zap_to_ceil (Alloc.proj_comonadic Areality mode)
+      Locality.zap_to_ceil_force (Alloc.proj_comonadic Areality mode)
       |> ignore)
     !allocations;
   reset_allocations ()
@@ -1118,8 +1118,8 @@ let check_dynamic pp hint expected_mode =
 (** Take [m0] which is the parameter to mutable, and the mode of the RHS (the
     content expression), returns the strongest mode the mutable variable can be.
 *)
-let mutvar_mode ~loc ~env m0 exp_mode =
-  let m = Value.newvar () in
+let mutvar_mode ~loc ~env level m0 exp_mode =
+  let m = Value.newvar level in
   let mode = mode_default m in
   let modalities = Typemode.let_mutable_modalities in
   submode ~loc ~env exp_mode (mode_modality modalities mode);
@@ -3050,8 +3050,8 @@ and type_pat_aux
         match mutable_flag with
         | Immutable -> alloc_mode, Val_reg sort
         | Mutable ->
-            let m0 = Value.Comonadic.newvar () in
-            let mode = mutvar_mode ~loc ~env:!!penv m0 alloc_mode in
+            let m0 = Value.Comonadic.newvar (Ctype.get_current_level ()) in
+            let mode = mutvar_mode ~loc ~env:!!penv (Ctype.get_current_level ()) m0 alloc_mode in
             let kind = Val_mut (m0, sort) in
             mode, kind
       in
@@ -5497,7 +5497,7 @@ let split_function_ty
          to be made global if its inner function is global. As a result, a
          function deserves a separate allocation mode.
       *)
-      let mode, _ = Value.newvar_below (as_single_mode expected_mode) in
+      let mode, _ = Value.newvar_below 0 (as_single_mode expected_mode) in
       register_allocation_value_mode ~loc mode
   in
   if expected_mode.strictly_local then
@@ -5726,7 +5726,7 @@ let pat_modes ~force_toplevel rec_mode_var (attrs, spat) =
             let mode = Value.newvar (get_current_level ()) in
             simple_pat_mode mode, mode_default mode
         | Local_tuple locs ->
-            let modes = List.map (fun loc -> Value.newvar (), loc) locs in
+            let modes = List.map (fun loc -> Value.newvar (get_current_level ()), loc) locs in
             let modes_pat = List.map fst modes in
             let mode = Value.newvar (get_current_level ()) in
             tuple_pat_mode mode modes_pat, mode_tuple mode modes
@@ -5822,7 +5822,7 @@ and type_expect_
         | Some sexp ->
             let exp, mode =
               with_local_level_if_principal begin fun () ->
-                let mode = Value.newvar () in
+                let mode = Value.newvar (get_current_level ()) in
                 let exp = type_exp ~recarg env (mode_default mode) sexp in
                 exp, mode
               end ~post:(fun (exp, _) -> generalize_structure_exp exp)
@@ -7625,6 +7625,7 @@ and type_expect_
         (* The overwritten cell has to be unique
            and should have the areality expected here: *)
         Value.newvar_below
+          (get_current_level ())
           (Value.meet [
             Value.of_const {Value.Const.max with uniqueness = Unique};
             Value.max_with_comonadic Areality

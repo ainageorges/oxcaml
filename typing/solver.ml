@@ -412,79 +412,6 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     constraint 'd = _ * _
   [@@ocaml.warning "-62"]
 
-  (** Polymorphic iterator type *)
-  type mode_iterator = { iter : 'a. 'a C.obj -> ('a, (allowed * allowed)) mode -> unit } [@@unboxed]
-
-  (** Hashtables indexed by mode variables *)
-  type key =
-  | Key : 'a C.obj * 'a var -> key
-
-  module ModeTbl =
-    Hashtbl.Make (struct
-      type t = key
-      let equal (Key (_, v0)) (Key (_, v1)) = v0.id = v1.id
-      let hash (Key (_, v)) = Hashtbl.hash v.id
-    end)
-
-  let key_iter : key -> mode_iterator -> unit =
-    fun (Key (obj, v)) { iter } -> iter obj (Amodevar (Amorphvar (v, C.id)))
-
-  exception Invalid_key
-
-  let create_key_exn : type a l r. a C.obj -> (a, l * r) mode -> key =
-    fun dst m ->
-      match m with
-      | Amodevar (Amorphvar (v, f)) ->
-          let src = C.src dst f in
-          Key (src, v)
-      | _ -> raise Invalid_key
-
-  let create_key_opt : type a l r. a C.obj -> (a, l * r) mode -> key option =
-    fun dst m ->
-      match m with
-      | Amodevar (Amorphvar (v, f)) ->
-          let src = C.src dst f in
-          Some (Key (src, v))
-      | _ -> None
-
-  (** Levels *)
-  let generic_level = Ident.highest_scope
-
-  (** Polymorphic iterator type *)
-  type mode_iterator = { iter : 'a. 'a C.obj -> ('a, (allowed * allowed)) mode -> unit } [@@unboxed]
-
-  (** Hashtables indexed by mode variables *)
-  type key =
-  | Key : 'a C.obj * 'a var -> key
-
-  module ModeTbl =
-    Hashtbl.Make (struct
-      type t = key
-      let equal (Key (_, v0)) (Key (_, v1)) = v0.id = v1.id
-      let hash (Key (_, v)) = Hashtbl.hash v.id
-    end)
-
-  let key_iter : key -> mode_iterator -> unit =
-    fun (Key (obj, v)) { iter } -> iter obj (Amodevar (Amorphvar (v, C.id)))
-
-  exception Invalid_key
-
-  let create_key_exn : type a l r. a C.obj -> (a, l * r) mode -> key =
-    fun dst m ->
-      match m with
-      | Amodevar (Amorphvar (v, f)) ->
-          let src = C.src dst f in
-          Key (src, v)
-      | _ -> raise Invalid_key
-
-  let create_key_opt : type a l r. a C.obj -> (a, l * r) mode -> key option =
-    fun dst m ->
-      match m with
-      | Amodevar (Amorphvar (v, f)) ->
-          let src = C.src dst f in
-          Some (Key (src, v))
-      | _ -> None
-
   (** Levels *)
   let generic_level = Ident.highest_scope
 
@@ -645,81 +572,96 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     Amode (a, hint, hint)
 
   let check_level_morphvar : type a l r. (a, l * r) morphvar -> int -> bool =
-    fun (Amorphvar (v, _)) i -> v.level = i
+    fun (Amorphvar (v, _, _)) i -> v.level = i
 
   let check_level : type a l r. (a, l * r) mode -> int -> bool =
     fun m i ->
       match m with
       | Amode _ -> true
       | Amodevar mv -> check_level_morphvar mv i
-      | Amodemeet (_, mvs) ->
-        List.fold_left (fun acc mv -> acc && check_level_morphvar mv i) true mvs
-      | Amodejoin (_, mvs) ->
-        List.fold_left (fun acc mv -> acc && check_level_morphvar mv i) true mvs
+      | Amodemeet (_, _, mvs) ->
+        VarMap.fold (fun _ mv acc -> acc && check_level_morphvar mv i) mvs true
+      | Amodejoin (_, _, mvs) ->
+        VarMap.fold (fun _ mv acc -> acc && check_level_morphvar mv i) mvs true
 
   let check_level_var : type a l r. (a, l * r) mode -> int -> bool =
     fun m i ->
       match m with
       | Amode _ -> false
       | Amodevar mv -> check_level_morphvar mv i
-      | Amodemeet (_, mvs) ->
-        List.fold_left (fun acc mv -> acc && check_level_morphvar mv i) (mvs <> []) mvs
-      | Amodejoin (_, mvs) ->
-        List.fold_left (fun acc mv -> acc && check_level_morphvar mv i) (mvs <> []) mvs
+      | Amodemeet (_, _, mvs) ->
+        VarMap.fold (fun _ mv acc -> acc && check_level_morphvar mv i) mvs (not (VarMap.is_empty mvs))
+      | Amodejoin (_, _, mvs) ->
+        VarMap.fold (fun _ mv acc -> acc && check_level_morphvar mv i) mvs (not (VarMap.is_empty mvs))
+
+  type var_iterator = { iter : 'a. 'a C.obj -> ('a, allowed * allowed) mode -> unit } [@@unboxed]
+
+  let mode_iter :
+      type a l r. a C.obj -> (a, (l * r)) mode -> var_iterator -> unit =
+    fun dst m { iter } ->
+      match m with
+      | Amodevar (Amorphvar (v, f, _f_hint)) ->
+        let src = C.src dst f in
+        iter src (Amodevar (Amorphvar (v, C.id, Id)))
+      | _ -> ()
 
   let rec iter_covariant_morphvar :
       type a r. visited:(int, unit) Hashtbl.t -> a C.obj
-      -> ((a, (allowed * disallowed)) mode -> unit) -> (a, allowed * r) morphvar -> unit =
-    fun ~visited dst iter (Amorphvar (v, f)) ->
+      -> (int -> (a, (allowed * disallowed)) mode -> unit) -> (a, allowed * r) morphvar -> unit =
+    fun ~visited dst iter (Amorphvar (v, f, f_hint)) ->
       if Hashtbl.mem visited v.id then () else begin
         Hashtbl.add visited v.id ();
-        List.iter (fun (Amorphvar (u, g)) ->
+        VarMap.iter (fun _ (Amorphvar (u, g, g_hint)) ->
           let fg = C.compose dst (C.disallow_right f) g in
-          let mu = Amorphvar (u, fg) in
+          let fg_hint = Comp_hint.Morph_hint.Compose
+                          (Comp_hint.Morph_hint.disallow_right f_hint, g_hint) in
+          let mu = Amorphvar (u, fg, fg_hint) in
           if u.level = 0 then
-            iter (Amodevar mu);
+            iter u.id (Amodevar mu);
           iter_covariant_morphvar ~visited dst iter mu) v.vlower
       end
 
   let iter_covariant :
       type a r. a C.obj -> (a, allowed * r) mode
-      -> ((a, (allowed * disallowed)) mode -> unit) -> unit =
+      -> (int -> (a, (allowed * disallowed)) mode -> unit) -> unit =
     fun dst m iter ->
       match m with
       | Amode _ -> ()
       | Amodevar mv ->
         let visited = Hashtbl.create 17 in
         iter_covariant_morphvar ~visited dst iter mv
-      | Amodejoin (_, mvs) ->
+      | Amodejoin (_, _, mvs) ->
         let visited = Hashtbl.create 17 in
-        List.iter (iter_covariant_morphvar ~visited dst iter) mvs
+        VarMap.iter (fun _ mv -> iter_covariant_morphvar ~visited dst iter mv) mvs
 
   let rec iter_contravariant_morphvar :
       type a l. visited:(int, unit) Hashtbl.t -> a C.obj
-      -> ((a, (disallowed * allowed)) mode -> unit) -> (a, l * allowed) morphvar -> unit =
-    fun ~visited dst iter (Amorphvar (v, f)) ->
+      -> (int -> (a, (disallowed * allowed)) mode -> unit) -> (a, l * allowed) morphvar -> unit =
+    fun ~visited dst iter (Amorphvar (v, f, f_hint)) ->
       if Hashtbl.mem visited v.id then () else begin
         Hashtbl.add visited v.id ();
-        List.iter (fun (Amorphvar (u, g)) ->
+        VarMap.iter (fun _ (Amorphvar (u, g, g_hint)) ->
           let fg = C.compose dst (C.disallow_left f) g in
-          let mu = Amorphvar (u, fg) in
+          let fg_hint = Comp_hint.Morph_hint.Compose
+                          (Comp_hint.Morph_hint.disallow_left f_hint, g_hint) in
+          let mu = Amorphvar (u, fg, fg_hint) in
           if u.level = 0 then
-            iter (Amodevar mu);
+            iter u.id (Amodevar mu);
           iter_contravariant_morphvar ~visited dst iter mu) v.vupper
       end
 
   let iter_contravariant :
       type a l. a C.obj -> (a, l * allowed) mode
-      -> ((a, (disallowed * allowed)) mode -> unit) -> unit =
+      -> (int -> (a, (disallowed * allowed)) mode -> unit) -> unit =
     fun dst m iter ->
       match m with
       | Amode _ -> ()
       | Amodevar mv ->
         let visited = Hashtbl.create 17 in
         iter_contravariant_morphvar ~visited dst iter mv
-      | Amodemeet (_, mvs) ->
+      | Amodemeet (_, _, mvs) ->
         let visited = Hashtbl.create 17 in
-        List.iter (iter_contravariant_morphvar ~visited dst iter) mvs
+        VarMap.iter (fun _ mv -> iter_contravariant_morphvar ~visited dst iter mv) mvs
 
   let apply_morphvar dst morph morph_hint (Amorphvar (var, morph', morph'_hint))
       =
@@ -1248,8 +1190,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
           end
 
   let update_level_v
-      : type a. log:_ -> H.Pinpoint.t -> a C.obj -> int -> a var -> unit =
-    fun ~log pp dst level u ->
+      : type a. log:_ -> a C.obj -> int -> a var -> unit =
+    fun ~log dst level u ->
     if u.level > level then begin
       let (vupper_lt, vupper_ge) =
         VarMap.partition (fun _ (Amorphvar(v, _, _)) -> v.level < level) u.vupper
@@ -1263,14 +1205,14 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       VarMap.iter
         (fun _ (Amorphvar(v, f, f_hint)) ->
           let f' = C.right_adjoint dst f in
-          let _, src, f'_hint = Comp_hint.Morph_hint.right_adjoint pp dst f_hint in
-          add_vupper_reversed ~log pp src v u f' f'_hint)
+          let _, src, f'_hint = Comp_hint.Morph_hint.right_adjoint H.Pinpoint.unknown dst f_hint in
+          add_vupper_reversed ~log H.Pinpoint.unknown src v u f' f'_hint)
         vlower_gt;
       VarMap.iter
         (fun _ (Amorphvar(v, f, f_hint)) ->
           let f' = C.left_adjoint dst f in
-          let _, src, f'_hint = Comp_hint.Morph_hint.left_adjoint pp dst f_hint in
-          add_vlower_reversed ~log pp src v u f' f'_hint)
+          let _, src, f'_hint = Comp_hint.Morph_hint.left_adjoint H.Pinpoint.unknown dst f_hint in
+          add_vlower_reversed ~log H.Pinpoint.unknown src v u f' f'_hint)
         vupper_ge;
       (* optimization: if lower = upper, we can remove vuppers and vlowers since the
         information is as precise as it can get *)
@@ -1350,39 +1292,39 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
   variable [u] such that [u] < [copy] and [copy] < [u] via submode, and lowers the [copy]
   to [current_level]. *)
   let rec generalize_topology_struct
-      : type a. log:_ -> H.Pinpoint.t -> a C.obj -> current_level:int ->
+      : type a. log:_ -> a C.obj -> current_level:int ->
         a var -> unit =
-    fun ~log pp dst ~current_level u ->
+    fun ~log dst ~current_level u ->
       if u.level <= current_level || u.level >= generic_level then ()
       else begin
         let new_level = generic_level + (u.level - current_level) in
         set_level ~log u new_level;
         let do_gen _ (Amorphvar (v, f, _f_hint)) =
           let src = C.src dst f in
-          generalize_topology_struct ~log pp src ~current_level v
+          generalize_topology_struct ~log src ~current_level v
         in
         VarMap.iter do_gen u.vupper;
         VarMap.iter do_gen u.vlower;
         (* If bounds are already tight, there is no need to create a copy *)
         if not (C.le dst u.upper u.lower) then begin
           let copy = fresh ~upper:u.upper ~lower:u.lower ~level:u.level dst in
-          let ok1 = submode_mvmv ~log pp dst
+          let ok1 = submode_mvmv ~log H.Pinpoint.unknown dst
                     (Amorphvar (copy, C.id, Comp_hint.Morph_hint.Id))
                     (Amorphvar (u, C.id, Comp_hint.Morph_hint.Id)) in
-          let ok2 = submode_mvmv ~log pp dst
+          let ok2 = submode_mvmv ~log H.Pinpoint.unknown dst
                     (Amorphvar (u, C.id, Comp_hint.Morph_hint.Id))
                     (Amorphvar (copy, C.id, Comp_hint.Morph_hint.Id)) in
           assert (Result.is_ok ok1 && Result.is_ok ok2);
-          update_level_v ~log pp dst current_level copy
+          update_level_v ~log dst current_level copy
         end
       end
 
   let generalize_v
-      : type a. log:_ -> H.Pinpoint.t -> a C.obj -> current_level:int ->
+      : type a. log:_ -> a C.obj -> current_level:int ->
         a var -> unit =
-    fun ~log pp dst ~current_level u ->
+    fun ~log dst ~current_level u ->
       generalize_topology ~log dst ~current_level u;
-      update_level_v ~log pp dst generic_level u
+      update_level_v ~log dst generic_level u
 
   (* generalize_structure has three cases:
     (1) if bounds are tight, the var is moved to generic_level
@@ -1393,69 +1335,69 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         constraint arrows via [add_vlower] and [add_vupper]
   *)
   let generalize_structure_v
-      : type a. log:_ -> H.Pinpoint.t -> a C.obj -> current_level:int ->
+      : type a. log:_ -> a C.obj -> current_level:int ->
         a var -> unit =
-    fun ~log pp dst ~current_level u ->
+    fun ~log dst ~current_level u ->
       if C.le dst u.upper u.lower then begin
         (* the bounds are tight *)
         generalize_topology ~log dst ~current_level u;
-        update_level_v ~log pp dst generic_level u
+        update_level_v ~log dst generic_level u
       end else if
         C.le dst (C.max dst) u.upper &&
         C.le dst u.lower (C.min dst) &&
         VarMap.is_empty u.vlower && VarMap.is_empty u.vupper then
         (* the bounds are fully open *)
-        update_level_v ~log pp dst current_level u
+        update_level_v ~log dst current_level u
       else begin
         (* the bounds are non-trivial *)
-        generalize_topology_struct ~log pp dst ~current_level u;
-        update_level_v ~log pp dst generic_level u
+        generalize_topology_struct ~log dst ~current_level u;
+        update_level_v ~log dst generic_level u
       end
 
-  let generalize (type a l r) (pp : H.Pinpoint.t) ~current_level (obj : a C.obj)
+  let generalize (type a l r) ~current_level (obj : a C.obj)
       (a : (a, l * r) mode) ~log =
     match a with
     | Amodevar (Amorphvar (v, f, _f_hint)) ->
       let obj = C.src obj f in
-      generalize_v ~log pp obj ~current_level v
+      generalize_v ~log obj ~current_level v
     | Amode _ -> ()
     | Amodejoin (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _f_hint)) ->
           let obj = C.src obj f in
-          generalize_v ~log pp obj ~current_level v)
+          generalize_v ~log obj ~current_level v)
         mvs
     | Amodemeet (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _f_hint)) ->
           let obj = C.src obj f in
-          generalize_v ~log pp obj ~current_level v)
+          generalize_v ~log obj ~current_level v)
         mvs
 
-  let generalize_structure (type a l r) (pp : H.Pinpoint.t) ~current_level (obj : a C.obj)
+  let generalize_structure (type a l r) ~current_level (obj : a C.obj)
       (a : (a, l * r) mode) ~log =
     match a with
     | Amodevar (Amorphvar (v, f, _f_hint)) ->
       let obj = C.src obj f in
-      generalize_structure_v ~log pp obj ~current_level v
+      generalize_structure_v ~log obj ~current_level v
     | Amode _ -> ()
     | Amodejoin (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _f_hint)) ->
           let obj = C.src obj f in
-          generalize_structure_v ~log pp obj ~current_level v)
+          generalize_structure_v ~log obj ~current_level v)
         mvs
     | Amodemeet (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _f_hint)) ->
           let obj = C.src obj f in
-          generalize_structure_v ~log pp obj ~current_level v)
+          generalize_structure_v ~log obj ~current_level v)
         mvs
 
   let rec copy_v
       : type a. copy_scope:_ -> copy_from_level:int -> copy_to_level:int ->
-        H.Pinpoint.t -> a C.obj -> a var -> a var =
-    fun ~copy_scope ~copy_from_level ~copy_to_level pp obj v ->
+        a C.obj -> a var -> a var =
+    fun ~copy_scope ~copy_from_level ~copy_to_level obj v ->
       if v.level < copy_from_level then v
       else begin
         (* TODO: generalize_structure might have already created a copy, we can optimize
@@ -1468,36 +1410,36 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
           let vupper = VarMap.map
             (fun (Amorphvar (u, f, f_hint)) ->
               let src = C.src obj f in
-              let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp src u in
+              let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level src u in
               (Amorphvar (ucopy, f, f_hint)))
             v.vupper;
           in
           let vlower = VarMap.map
             (fun (Amorphvar (u, f, f_hint)) ->
               let src = C.src obj f in
-              let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp src u in
+              let ucopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level src u in
               (Amorphvar (ucopy, f, f_hint)))
             v.vlower
           in
           copy.vupper <- vupper;
           copy.vlower <- vlower;
-          update_level_v ~log:None pp obj copy_to_level copy;
+          update_level_v ~log:None obj copy_to_level copy;
           copy
       end
 
-  let copy (type a l r) ~copy_scope ~copy_from_level ~copy_to_level (pp : H.Pinpoint.t)
+  let copy (type a l r) ~copy_scope ~copy_from_level ~copy_to_level
       (obj : a C.obj) (a : (a, l * r) mode) : (a, l * r) mode =
     match a with
     | Amodevar (Amorphvar (v, f, f_hint)) ->
       let obj = C.src obj f in
-      let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp obj v in
+      let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level obj v in
       Amodevar (Amorphvar (vcopy, f, f_hint))
     | Amode (a, a_hint_lower, a_hint_upper) -> Amode (a, a_hint_lower, a_hint_upper)
     | Amodejoin (a, a_hint, mvs) ->
       let mvscopy = VarMap.map
         (fun (Amorphvar (v, f, f_hint)) ->
           let obj = C.src obj f in
-          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp obj v in
+          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level obj v in
           (Amorphvar (vcopy, f, f_hint))) mvs
       in
       Amodejoin (a, a_hint, mvscopy)
@@ -1505,29 +1447,29 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       let mvscopy = VarMap.map
         (fun (Amorphvar (v, f, f_hint)) ->
           let obj = C.src obj f in
-          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level pp obj v in
+          let vcopy = copy_v ~copy_scope ~copy_from_level ~copy_to_level obj v in
           (Amorphvar (vcopy, f, f_hint))) mvs
       in
       Amodemeet (a, a_hint, mvscopy)
 
-  let update_level (type a l r) (pp : H.Pinpoint.t) (level : int) (obj : a C.obj)
+  let update_level (type a l r) (level : int) (obj : a C.obj)
       (a : (a, l * r) mode) ~log =
     match a with
     | Amodevar (Amorphvar (v, f, _)) ->
       let obj = C.src obj f in
-      update_level_v ~log pp obj level v
+      update_level_v ~log obj level v
     | Amode _ -> ()
     | Amodejoin (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _)) ->
           let obj = C.src obj f in
-          update_level_v ~log pp obj level v)
+          update_level_v ~log obj level v)
         mvs
     | Amodemeet (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _)) ->
           let obj = C.src obj f in
-          update_level_v ~log pp obj level v)
+          update_level_v ~log obj level v)
         mvs
 
   let submode (type a r l) (pp : H.Pinpoint.t) (obj : a C.obj)
@@ -1868,105 +1810,6 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       Misc.fatal_errorf "mode is not tight: floor = %a, ceil = %a" (C.print obj)
         floor (C.print obj) ceil
 
-    (** Descriptions for typing *)
-  module Desc = struct
-
-    module Var = struct
-      type 'a t = 'a var
-
-      type ('b, 'd) t_with_morph = ('b, 'd) morphvar =
-      | Amorphvar : 'a t * ('a, 'b, 'd) C.morph -> ('b, 'd) t_with_morph
-
-      module Head = struct
-        type 'a t = {
-          desc_id : int;
-          desc_upper : 'a;
-          desc_lower : 'a;
-          desc_vlower : (('a,left_only) t_with_morph) list;
-          desc_level : int;
-        }
-
-        let equal v1 v2 = v1.desc_id = v2.desc_id
-
-        let hash v = Hashtbl.hash v.desc_id
-      end
-
-      let force : 'a C.obj -> 'a var -> 'a Head.t =
-        fun obj v ->
-          let desc_id = v.id in
-          let desc_lower = get_floor obj (Amodevar (Amorphvar (v, C.id))) in
-          let desc_upper = get_ceil obj (Amodevar (Amorphvar (v, C.id))) in
-          (* let desc_lower = v.lower in
-          let desc_upper = v.upper in *)
-          let desc_vlower = v.vlower in
-          let desc_level = v.level in
-          { desc_id; desc_lower; desc_upper; desc_vlower; desc_level }
-
-    end
-
-    type ('b, 'd) morphvar =
-    | Amorphvar : 'a Var.Head.t * ('a, 'b, 'd) C.morph -> ('b, 'd) morphvar
-
-    type ('a, 'd) t =
-    | Amode : 'a -> ('a, 'l * 'r) t
-    | Amodevar : ('a, 'd) morphvar -> ('a, 'd) t
-    | Amodejoin :
-        'a * ('a, 'l * disallowed) morphvar list
-        -> ('a, 'l * disallowed) t
-    | Amodemeet :
-       'a * ('a, disallowed * 'r) morphvar list
-       -> ('a, disallowed * 'r) t
-
-    let print_var :
-        type a. a C.obj -> Format.formatter -> a Var.Head.t -> unit =
-      fun obj ppf { desc_id; desc_upper; desc_lower; desc_level } ->
-        Format.fprintf ppf "%x<%d>[%a--%a]"
-          desc_id desc_level (C.print obj) desc_lower (C.print obj) desc_upper
-
-    let print_morphvar :
-        type a l r. a C.obj -> Format.formatter -> (a, l * r) morphvar -> unit =
-      fun dst ppf mv ->
-        let (Amorphvar (v, f)) = mv in
-        let src = C.src dst f in
-        Format.fprintf ppf "%a(%a)" (C.print_morph dst) f (print_var src) v
-
-    let print :
-        type a l r. a C.obj -> Format.formatter -> (a, l * r) t -> unit =
-      fun obj ppf m ->
-        match m with
-        | Amode a -> C.print obj ppf a
-        | Amodevar mv -> print_morphvar obj ppf mv
-        | Amodejoin (a, mvs) ->
-          Format.fprintf ppf "join(%a,%a)"
-            (C.print obj) a
-            (Format.pp_print_list
-              ~pp_sep:(fun ppf () -> Format.fprintf ppf ",")
-              (print_morphvar obj)) mvs
-        | Amodemeet (a, mvs) ->
-          Format.fprintf ppf "meet(%a,%a)"
-            (C.print obj) a
-            (Format.pp_print_list
-              ~pp_sep:(fun ppf () -> Format.fprintf ppf ",")
-              (print_morphvar obj)) mvs
-
-  end
-
-  let desc_morphvar : type a l r. a C.obj -> (a, (l * r)) morphvar -> (a, (l * r)) Desc.morphvar =
-    fun dst (Amorphvar (v, f)) ->
-      let src = C.src dst f in
-      let v = Desc.Var.force src v in
-      Desc.Amorphvar (v, f)
-
-  let desc : type a l r. a C.obj -> (a, (l * r)) mode -> (a, (l * r)) Desc.t =
-    fun dst m ->
-      match m with
-      | Amode a -> Desc.Amode a
-      | Amodevar mv -> Desc.Amodevar (desc_morphvar dst mv)
-      | Amodejoin (a, mvs) ->
-        Desc.Amodejoin (a, List.map (desc_morphvar dst) mvs)
-      | Amodemeet (a, mvs) ->
-        Desc.Amodemeet (a, List.map (desc_morphvar dst) mvs)
-
   let print : type a l r.
       ?verbose:bool -> a C.obj -> Format.formatter -> (a, l * r) mode -> unit =
    fun ?verbose (obj : a C.obj) ppf m ->
@@ -1990,6 +1833,7 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
             (Amorphvar
                ( fresh ~lower:a
                    ~lower_hint:(Comp_hint.disallow_right a_hint_lower)
+                   ~level
                    obj,
                  C.id,
                  Id )),

@@ -175,7 +175,7 @@ type 'a type_iterators =
     it_do_type_expr: 'a type_iterators -> 'a;
     it_type_expr: 'a type_iterators -> type_expr -> unit;
     it_mode_expr: Mode.Alloc.lr -> unit;
-    it_modality: Mode.Modality.Value.t -> unit;
+    it_modality: Mode.Modality.t -> unit;
     it_path: Path.t -> unit; }
 
 type type_iterators_full = (type_expr -> unit) type_iterators

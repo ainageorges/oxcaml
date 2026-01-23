@@ -695,14 +695,15 @@ let closed_type_expr ?env ty =
     try closed_type ?env mark ty; true
     with Non_closed _ -> false)
 
-let close_type mark ty =
-  remove_mode_and_jkind_variables ty;
+(* CR ageorges: why do we zap mode variables here, and do we need to remember zap scope? *)
+let close_type ~zap_scope mark ty =
+  remove_mode_and_jkind_variables ~zap_scope ty;
   closed_type mark ty
 
 let closed_parameterized_type params ty =
   with_type_mark begin fun mark ->
     List.iter (mark_type mark) params;
-    try close_type mark ty; true with Non_closed _ -> false
+    try Alloc.with_zap_scope close_type mark ty; true with Non_closed _ -> false
   end
 
 let closed_type_decl ~zap_scope decl =
@@ -731,14 +732,14 @@ let closed_type_decl ~zap_scope decl =
           )
           v
     | Type_record(r, _rep, _) ->
-        List.iter (fun l -> close_type ~zap_scope mark l.ld_type) r
+        List.iter (fun l -> close_type mark ~zap_scope l.ld_type) r
     | Type_record_unboxed_product(r, _rep, _) ->
-        List.iter (fun l -> close_type ~zap_scope mark l.ld_type) r
+        List.iter (fun l -> close_type mark ~zap_scope l.ld_type) r
     | Type_open -> ()
     end;
     begin match decl.type_manifest with
       None    -> ()
-    | Some ty -> close_type ~zap_scope mark ty
+    | Some ty -> close_type mark ~zap_scope ty
     end;
     None
   with Non_closed (ty, _) ->
@@ -747,7 +748,7 @@ let closed_type_decl ~zap_scope decl =
 
 let closed_extension_constructor ~zap_scope ext =
   with_type_mark begin fun mark -> try
-    List.iter (mark_type ~zap_scope mark) ext.ext_type_params;
+    List.iter (mark_type mark) ext.ext_type_params;
     begin match ext.ext_ret_type with
     | Some res_ty ->
         (* gadts cannot have free type variables, but they might
@@ -778,7 +779,7 @@ let closed_class ~zap_scope params sign =
     Meths.iter
       (fun lab (priv, _, ty) ->
         if priv = Mpublic then begin
-          try close_type mark ~zap_scope ty with Non_closed (ty0, variable_kind) ->
+          try close_type ~zap_scope mark ty with Non_closed (ty0, variable_kind) ->
             raise (CCFailure {
               free_variable = (ty0, variable_kind);
               meth = lab;
@@ -809,10 +810,11 @@ let duplicate_class_type ty =
                          (*  Type level manipulation  *)
                          (*****************************)
 
+(* CR ageorges: lower the level of mode variables as well? *)
 let rec lower_all ty =
   if get_level ty > !current_level then begin
     set_level ty !current_level;
-    iter_type_expr lower_all ty
+    iter_type_expr lower_all (Fun.const ()) ty
   end
 
 (*
@@ -1782,19 +1784,19 @@ let prim_mode' mvars = function
     | None -> assert false
 
 (* Exported version. *)
-let prim_mode mvar prim =
+let prim_mode mvar prim ~level =
   let mvar = Option.map
-    (fun mvar_l -> mvar_l, (Forkable.newvar (), Yielding.newvar ())) mvar
+    (fun mvar_l -> mvar_l, (Forkable.newvar level, Yielding.newvar level)) mvar
   in
   fst (prim_mode' mvar prim)
 
 (** Returns a new mode variable whose locality is the given locality and
     whose yieldingness is the given yieldingness, while all other axes are
     from the given [m]. This function is too specific to be put in [mode.ml] *)
-let with_locality_and_forkable_yielding (locality, fy) m =
+let with_locality_and_forkable_yielding (locality, fy) m level =
   let forkable = Option.map fst fy in
   let yielding = Option.map snd fy in
-  let m' = Alloc.newvar () in
+  let m' = Alloc.newvar level in
   Locality.equate_exn (Alloc.proj_comonadic Areality m') locality;
   let forkable =
     Option.value ~default:(Alloc.proj_comonadic Forkable m) forkable
@@ -1821,7 +1823,10 @@ comonadic axes of [B -> C] reflect that.
 On the other hand, the monadic axes of [fun b -> ...] won't be constrained by
 this (but maybe constrained by other things); therefore, we take it to be legacy
 for compatibility. *)
-let curry_mode alloc arg : Alloc.Const.t =
+let curry_mode (type r) (alloc : (allowed * r) Alloc.Comonadic.t) (arg : Alloc.lr) : Alloc.Comonadic.l =
+  Alloc.Comonadic.join
+    [(Alloc.close_over arg).comonadic; (Alloc.Comonadic.disallow_right alloc)]
+let curry_mode_const alloc arg : Alloc.Const.t =
   let acc =
     Alloc.Comonadic.Const.join
       (Alloc.Const.close_over arg)
@@ -1833,7 +1838,7 @@ let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
   match locals, get_desc ty with
   | l :: locals, Tarrow ((lbl,marg,mret),arg,ret,commu) ->
      let marg = with_locality_and_forkable_yielding
-      (prim_mode' (Some (mvar_l, mvar_y)) l) marg
+      (prim_mode' (Some (mvar_l, mvar_y)) l) marg (get_level ty)
      in
      let macc =
        Alloc.join [
@@ -1844,7 +1849,7 @@ let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
      in
      let mret =
        match locals with
-       | [] -> with_locality_and_forkable_yielding (loc, yld) mret
+       | [] -> with_locality_and_forkable_yielding (loc, yld) mret (get_level ty)
        | _ :: _ ->
           let mret', _ = Alloc.newvar_above (get_level ty) macc in (* curried arrow *)
           mret'
@@ -1923,8 +1928,8 @@ let instance_prim_mode (desc : Primitive.description) ty =
   let is_poly = function Primitive.Prim_poly, _ -> true | _ -> false in
   if is_poly desc.prim_native_repr_res ||
        List.exists is_poly desc.prim_native_repr_args then
-    let mode_l = Locality.newvar () in
-    let mode_fy = Forkable.newvar (), Yielding.newvar () in
+    let mode_l = Locality.newvar 0 in
+    let mode_fy = Forkable.newvar 0, Yielding.newvar 0 in
     let finalret =
       prim_mode' (Some (mode_l, mode_fy)) desc.prim_native_repr_res
     in
@@ -2992,7 +2997,7 @@ let rec occur_rec env visited allow_recursive parents ty0 ty =
         begin try
           if TypeSet.mem ty parents then raise Occur;
           let parents = TypeSet.add ty parents in
-          iter_type_expr (occur_rec env visited allow_recursive parents ty0) ty
+          iter_type_expr (occur_rec env visited allow_recursive parents ty0) (Fun.const ()) ty
         with Occur -> try
           let ty' = try_expand_head try_expand_safe env ty in
           (* This call used to be inlined, but there seems no reason for it.
@@ -3006,7 +3011,7 @@ let rec occur_rec env visited allow_recursive parents ty0 ty =
     | _ ->
         if allow_recursive ||  TypeSet.mem ty parents then () else begin
           let parents = TypeSet.add ty parents in
-          iter_type_expr (occur_rec env visited allow_recursive parents ty0) ty
+          iter_type_expr (occur_rec env visited allow_recursive parents ty0) (Fun.const ()) ty
         end
     end;
     ignore (try_mark_node visited ty)
@@ -3786,7 +3791,7 @@ let find_lowest_level ty =
       if try_mark_node mark ty then begin
         let level = get_level ty in
         if level < !lowest then lowest := level;
-        iter_type_expr find ty
+        iter_type_expr find (Fun.const ()) ty
       end
     in find ty
   end;
@@ -5237,7 +5242,7 @@ let moregen_occur env level ty =
       let lv = get_level ty in
       if lv <= level then () else
       if is_Tvar ty && lv >= generic_level - 1 then raise Occur else
-      if try_mark_node mark ty then iter_type_expr occur ty
+      if try_mark_node mark ty then iter_type_expr occur (Fun.const ()) ty
     in
     try
       occur ty
@@ -5764,14 +5769,8 @@ let rec rigidify_rec mark vars ty =
         if not (static_row row) then
           rigidify_rec mark vars (row_more row)
     | _ ->
-        iter_type_expr (rigidify_rec mark vars) ty
+        iter_type_expr (rigidify_rec mark vars) (Fun.const ()) ty
     end
-
-type var = { name : string option
-           ; original_jkind : jkind_lr
-           ; ty : type_expr }
-
-type t = var list
 
 type var = { name : string option
            ; original_jkind : jkind_lr
@@ -6516,10 +6515,10 @@ let rec build_subtype env (visited : transient_expr list)
           let posi_arg = not posi in
           if posi_arg then begin
             let a = cross_right_alloc env t1 a in
-            build_submode_pos a
+            build_submode_pos level a
           end else begin
             let a = cross_left_alloc env t1 a in
-            build_submode_neg a
+            build_submode_neg level a
           end
         end else a, Unchanged
       in
@@ -7208,7 +7207,7 @@ let rec normalize_type_rec mark ty =
         set_type_desc fi (get_desc fi')
     | _ -> ()
     end;
-    iter_type_expr (normalize_type_rec mark) ty;
+    iter_type_expr (normalize_type_rec mark) (Fun.const ()) ty;
   end
 
 let normalize_type ty =

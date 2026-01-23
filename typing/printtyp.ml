@@ -1517,7 +1517,7 @@ let rec tree_of_modal_typexp mode modal ty =
   let not_arrow tree =
     match modal with
     | Arrow_return {mode; _} ->
-        let mode = Alloc.zap_to_legacy mode in
+        let mode = Alloc.zap_to_legacy_force mode in
         Otyp_ret (Orm_any (tree_of_modes mode), tree)
     | Other _ -> tree
   in
@@ -1556,7 +1556,7 @@ let rec tree_of_modal_typexp mode modal ty =
           else
             tree_of_typexp mode arg_mode ty1
         in
-        let acc_mode = curry_mode alloc_mode arg_mode in
+        let acc_mode = curry_mode_const alloc_mode arg_mode in
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
         let t2 = tree_of_modal_typexp mode modal ty2 in
         Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
@@ -1724,11 +1724,11 @@ and tree_of_ret_typ_mutating acc_mode m ty=
       | Error _ ->
         (* In this branch we need to print parens. [m] might have undetermined
         axes and we adopt a similar logic to the [marg] above. *)
-        let m = Alloc.zap_to_legacy m in
+        let m = Alloc.zap_to_legacy_force m in
         (Orm_parens (tree_of_modes m), m)
       end
   | _ ->
-    let m = Alloc.zap_to_legacy m in
+    let m = Alloc.zap_to_legacy_force m in
     (Orm_any (tree_of_modes m), m)
 
 and tree_of_typobject mode fi nm =
@@ -2667,7 +2667,7 @@ let rec tree_of_modtype ?abbrev = function
         tree_of_functor_parameter ?abbrev param
       in
       let res = wrap_env env (tree_of_modtype ?abbrev) ty_res in
-      let mres = m_res |> Mode.Alloc.zap_to_legacy |> tree_of_modes in
+      let mres = m_res |> Mode.Alloc.zap_to_legacy_force |> tree_of_modes in
       Omty_functor (param, res, mres))
   | Mty_alias p ->
       Omty_alias (tree_of_path (Some Module) p)
@@ -2694,7 +2694,7 @@ and tree_of_functor_parameter ?abbrev = function
             Some (Ident.name id),
             fun k -> Env.add_module ~arg:true id Mp_present ty_arg k
       in
-      let marg = m_arg |> Mode.Alloc.zap_to_legacy |> tree_of_modes in
+      let marg = m_arg |> Mode.Alloc.zap_to_legacy_force |> tree_of_modes in
       Some (name, tree_of_modtype ?abbrev ty_arg, marg), env
 
 and tree_of_signature ?abbrev = function

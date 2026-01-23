@@ -181,9 +181,6 @@ module type Solver_mono = sig
 
   type pinpoint
 
-  (** The exposed description of a mode *)
-  type ('a, 'd) desc
-
   (** Represents a sequence of local changes to the copying scope of a mode variable.
       Copying a mode takes a [copy_scope], and it is up to the caller to create a
       new copy scope, and reset it once all copies have been made *)
@@ -218,26 +215,6 @@ module type Solver_mono = sig
       allowance.mli.*)
   type ('a, 'd) mode constraint 'd = 'l * 'r
 
-  (** The mode type for the opposite polarity. *)
-  type ('a, 'd) mode_op constraint 'd = 'l * 'r
-
-  (** The key type used for a Hashtbl indexed by mode variables *)
-  type key
-
-  (** An iterator for keys. The mode is a mode variable, paired with the identity morphism *)
-  type mode_iterator = { iter : 'a. 'a obj -> ('a, (allowed * allowed)) mode -> unit } [@@unboxed]
-  val key_iter : key -> mode_iterator -> unit
-
-  (** Inspects a mode and returns a key if the mode is a mode variable. Raises an
-      Invalid_key exception if it is not *)
-  val create_key_exn : 'a obj -> ('a, 'l * 'r) mode -> key
-
-  (** Inspects a mode and returns a key if the mode is a mode variable, None if not *)
-  val create_key_opt : 'a obj -> ('a, 'l * 'r) mode -> key option
-
-  (** Returns the description of a mode. *)
-  val desc : 'a obj -> ('a, 'd) mode -> ('a, 'd polarized) desc
-
   include Allow_disallow with type ('a, _, 'd) sided = ('a, 'd) mode
 
   (** Returns the mode representing the given constant, explained by the
@@ -256,9 +233,6 @@ module type Solver_mono = sig
 
   (** The maximum mode in the lattice *)
   val max : 'a obj -> ('a, 'l * 'r) mode
-
-  (** The level of generic variables *)
-  val generic_level : int
 
   (** The level of generic variables *)
   val generic_level : int
@@ -317,7 +291,6 @@ module type Solver_mono = sig
 
   (** Lowers a level of a variable. *)
   val update_level :
-    pinpoint ->
     int ->
     'a obj ->
     ('a, 'l * 'r) mode ->
@@ -327,7 +300,6 @@ module type Solver_mono = sig
   (** Generalizes all reachable variables whose level is above [current_level],
       by putting their level to [generic_level]. *)
   val generalize :
-    pinpoint ->
     current_level:int ->
     'a obj ->
     ('a, 'l * 'r) mode ->
@@ -337,7 +309,6 @@ module type Solver_mono = sig
   (** Generalizes all reachable variables whose level is above [current_level],
       whose value is fully determined, by putting their level to [generic_level].*)
   val generalize_structure :
-      pinpoint ->
       current_level:int ->
       'a obj ->
       ('a, 'l * 'r) mode ->
@@ -351,7 +322,6 @@ module type Solver_mono = sig
     copy_scope:copy_scope ->
     copy_from_level:int ->
     copy_to_level:int ->
-    pinpoint ->
     'a obj ->
     ('a, 'l * 'r) mode ->
     ('a, 'l * 'r) mode
@@ -405,19 +375,25 @@ module type Solver_mono = sig
   val check_level_var :
     ('a, 'l * 'r) mode -> int -> bool
 
+  type var_iterator = { iter : 'a. 'a obj -> ('a, allowed * allowed) mode -> unit } [@@unboxed]
+
+  val mode_iter : 'a obj -> ('a, ('l * 'r)) mode -> var_iterator -> unit
+
   (** Applies an iterator over every reachable covariant (left-) constraint variable.
-      The iterator is only applied to constraint variables at level 0.
+      The iterator is only applied to constraint variables at level 0, and exposes the
+      int identifier of the constraint variable.
       WARNING: the iterator is only applied once per constraint, even when it appears as
       a constraint multiple times via different morphisms *)
   val iter_covariant :
-    'a obj -> ('a, allowed * 'r) mode -> (('a, allowed * disallowed) mode -> unit) -> unit
+    'a obj -> ('a, allowed * 'r) mode -> (int -> ('a, allowed * disallowed) mode -> unit) -> unit
 
   (** Applies an iterator over every reachable contravariant (right-) constraint variable.
-      The iterator is only applied to constraint variables at level 0.
+      The iterator is only applied to constraint variables at level 0, and exposes the
+      int identifier of the constraint variable.
       WARNING: the iterator is only applied once per constraint, even when it appears as
       a constraint multiple times via different morphisms *)
   val iter_contravariant :
-    'a obj -> ('a, 'l * allowed) mode -> (('a, disallowed * allowed) mode -> unit) -> unit
+    'a obj -> ('a, 'l * allowed) mode -> (int -> ('a, disallowed * allowed) mode -> unit) -> unit
 
   (** Apply a monotone morphism explained by an optional hint *)
   val apply :
