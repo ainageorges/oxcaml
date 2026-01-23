@@ -10671,7 +10671,8 @@ and type_n_ary_function
         Zero_alloc.create_const zero_alloc
     in
     let alloc_mode = Mode.Alloc.disallow_left fun_alloc_mode in
-    let ret_mode = Mode.Alloc.newvar_above_if_nonzero ret_mode in
+    let ret_mode_modes = Mode.Alloc.newvar_above_if_nonzero ret_mode.mode_modes in
+    let ret_mode = { ret_mode with mode_modes = ret_mode_modes } in
     re
       { exp_desc =
           Texp_function
